@@ -23,11 +23,9 @@
     .route-num { font-size: 26px; font-weight: 800; color: var(--text-main); }
     .route-dest { font-size: 16px; color: var(--text-sec); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .stop-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--blue); font-weight: 500; }
-    .stop-dist { background: rgba(10, 132, 255, 0.2); padding: 2px 6px; border-radius: 6px; font-size: 11px; }
     .stop-name { color: #98989d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
     .eta-box { text-align: right; min-width: 70px; display: flex; flex-direction: column; align-items: flex-end; }
     .eta-time { font-size: 28px; font-weight: 800; color: var(--accent); line-height: 1.1; }
-    .eta-imminent { color: var(--kmb-red); font-size: 24px; }
     .eta-unit { font-size: 12px; color: var(--text-sec); font-weight: 500; margin-top: 4px; }
     .status-area { text-align: center; padding: 40px 20px; color: var(--text-sec); font-size: 15px; line-height: 1.5; }
     .loader { display: inline-block; width: 24px; height: 24px; border: 3px solid rgba(255, 255, 255, 0.1); border-radius: 50%; border-top-color: var(--blue); animation: spin 1s ease-in-out infinite; margin-bottom: 12px; }
@@ -59,29 +57,17 @@
     let allKmbStopsCache = null;
     let autoRefreshTimer;
 
-    function checkInstallPrompt() {
-      const ua = navigator.userAgent.toLowerCase();
-      const isIOS = /ipad|iphone|ipod/.test(ua) && !window.MSStream;
-      const isAndroid = /android/.test(ua);
-      const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-
-      if (!isStandalone) {
-        setTimeout(() => {
-          const promptEl = document.getElementById('installPrompt');
-          if (isIOS) {
-            promptEl.style.bottom = '25px';
-            promptEl.innerHTML = `<button class="close-btn" onclick="this.parentElement.style.display='none'">✕</button>
-              <div style="font-weight:700; margin-bottom: 12px; color:var(--blue); font-size:17px;">💡 升級專屬 App</div>
-              <div style="text-align: left; font-size: 15px; line-height: 2;">1. 點擊下方分享按鈕<br>2. 往下滑動找到<b>「加入主畫面」</b></div>`;
-            promptEl.style.display = 'block';
-          } else if (isAndroid) {
-            promptEl.style.top = '15px';
-            promptEl.innerHTML = `<button class="close-btn" onclick="this.parentElement.style.display='none'">✕</button>
-              <div style="font-weight:700; margin-bottom: 12px; color:var(--blue); font-size:17px;">💡 升級專屬 App</div>
-              <div style="text-align: left; font-size: 15px; line-height: 2;">1. 點擊右上角 ⋮ 選單<br>2. 選擇<b>「加至主畫面」</b></div>`;
-            promptEl.style.display = 'block';
-          }
-        }, 2000);
+    // 💡 強力封裝 fetch，內建 3 次重試機制
+    async function fetchWithRetry(url, retries = 3) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error();
+          return await res.json();
+        } catch (e) {
+          if (i === retries - 1) throw e;
+          await new Promise(r => setTimeout(r, 1000)); // 每次失敗等 1 秒
+        }
       }
     }
 
@@ -103,8 +89,7 @@
     async function fetchNearbyBuses(lat, lon) {
       try {
         if (!allKmbStopsCache) {
-          let res = await fetch("https://data.etabus.gov.hk/v1/transport/kmb/stop");
-          allKmbStopsCache = (await res.json()).data;
+          allKmbStopsCache = (await fetchWithRetry("https://data.etabus.gov.hk/v1/transport/kmb/stop")).data;
         }
 
         let nearby = allKmbStopsCache.filter(stop => {
@@ -112,13 +97,15 @@
           return d <= SEARCH_RADIUS;
         });
 
+        // 💡 針對每個站點的 ETA 請求也加上重試
         let etas = (await Promise.all(nearby.map(async s => {
-          let res = await fetch(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${s.stop}`);
-          return (await res.json()).data.map(e => ({...e, stopName: s.name_tc}));
+          try {
+            return (await fetchWithRetry(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${s.stop}`)).data.map(e => ({...e, stopName: s.name_tc}));
+          } catch { return []; }
         }))).flat().filter(b => b.eta && new Date(b.eta) > new Date()).sort((a,b) => new Date(a.eta) - new Date(b.eta));
 
         renderUI(etas);
-      } catch (e) { showError("無法連線至九巴伺服器。"); }
+      } catch (e) { showError("無法連線至九巴伺服器，請稍後再試。"); }
     }
 
     function renderUI(etas) {
@@ -146,7 +133,6 @@
     }
 
     initGeolocation();
-    checkInstallPrompt();
   </script>
 </body>
 </html>

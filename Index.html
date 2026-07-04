@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="聯和墟巴士">
+  <link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/KMB_Logo.svg/1024px-KMB_Logo.svg.png">
+  
+  <title>聯和墟總站動態監控</title>
+  
+  <style>
+    /* iOS 原生暗黑風格設計 */
+    :root {
+      --bg-color: #000000;
+      --card-bg: #1c1c1e;
+      --text-main: #ffffff;
+      --text-sec: #ebebf599;
+      --accent: #ffd60a;
+      --blue: #0a84ff;
+      --divider: #38383a;
+    }
+    
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none; /* 防止反白文字 */
+    }
+
+    .header {
+      background-color: var(--card-bg);
+      padding: 20px 20px 15px;
+      padding-top: env(safe-area-inset-top, 40px); /* 適配 iPhone 瀏海/動態島 */
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--divider);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .header-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .refresh-btn {
+      background: none;
+      border: none;
+      color: var(--blue);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 5px 10px;
+      background-color: #0a84ff20;
+      border-radius: 12px;
+    }
+    
+    .refresh-btn:active { opacity: 0.7; }
+
+    .list-container {
+      padding: 15px 20px;
+      padding-bottom: env(safe-area-inset-bottom, 20px);
+    }
+
+    .bus-row {
+      display: flex;
+      align-items: center;
+      padding: 14px 0;
+      border-bottom: 0.5px solid var(--divider);
+    }
+
+    .bus-row:last-child { border-bottom: none; }
+
+    .route {
+      font-size: 22px;
+      font-weight: 700;
+      width: 75px;
+      flex-shrink: 0;
+    }
+
+    .dest {
+      font-size: 15px;
+      color: var(--text-sec);
+      flex-grow: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .wheelchair {
+      font-size: 16px;
+      color: var(--blue);
+      margin-right: 12px;
+      width: 20px;
+      text-align: center;
+    }
+
+    .eta-container {
+      text-align: right;
+      min-width: 60px;
+    }
+
+    .eta {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .eta.none { color: #666; }
+
+    .eta-unit {
+      font-size: 12px;
+      color: var(--text-sec);
+      font-weight: 400;
+    }
+
+    .status-text {
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-sec);
+      margin-top: 20px;
+    }
+
+    /* 載入動畫 */
+    .loader {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--text-sec);
+      border-radius: 50%;
+      border-top-color: var(--accent);
+      animation: spin 1s ease-in-out infinite;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-title">🔖 聯和墟動態監控</div>
+    <button class="refresh-btn" id="refreshBtn" onclick="fetchData()">更新中...</button>
+  </div>
+
+  <div class="list-container" id="busList">
+    </div>
+  <div class="status-text" id="lastUpdated">正在獲取九巴即時數據...</div>
+
+  <script>
+    const monitorBuses = [
+      { route: "278K", dest: "粉嶺站", matchDest: "粉嶺" },
+      { route: "79K", dest: "打鼓嶺", matchDest: "打鼓嶺" }, 
+      { route: "78K", dest: "上水(太平)", matchDest: "太平" }, 
+      { route: "A43", dest: "機場", matchDest: "機場" }, 
+      { route: "A43P", dest: "機場", matchDest: "機場" }, 
+      { route: "A43", dest: "粉嶺(聯和墟)", matchDest: "聯和墟" }, 
+      { route: "A43P", dest: "粉嶺(聯和墟)", matchDest: "聯和墟" }, 
+      { route: "70K", dest: "清河(循環線)", matchDest: "清河" }, 
+      { route: "673", dest: "上水", matchDest: "上水" }
+    ];
+
+    let autoRefreshTimer;
+
+    async function fetchData() {
+      const btn = document.getElementById("refreshBtn");
+      const list = document.getElementById("busList");
+      const status = document.getElementById("lastUpdated");
+      
+      btn.innerText = "更新中...";
+      btn.disabled = true;
+
+      try {
+        // 1. 取得所有站點
+        let stopsRes = await fetch("https://data.etabus.gov.hk/v1/transport/kmb/stop");
+        let stopsJson = await stopsRes.json();
+        
+        let lwhStops = stopsJson.data.filter(s => s.name_tc.includes("聯和墟"));
+        let stopIds = lwhStops.map(s => s.stop);
+        
+        // 2. 並行獲取聯和墟所有站點的 ETA
+        let fetchPromises = stopIds.map(async (id) => {
+          let etaRes = await fetch(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${id}`);
+          let etaJson = await etaRes.json();
+          return (etaJson && etaJson.data) ? etaJson.data : [];
+        });
+        
+        let results = await Promise.all(fetchPromises);
+        let allEtas = results.flat();
+
+        renderUI(allEtas);
+
+        const now = new Date();
+        status.innerHTML = `最後更新：${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')} (每 30 秒自動更新)`;
+
+      } catch (e) {
+        console.error(e);
+        status.innerHTML = "⚠️ 數據獲取失敗，請檢查網路連線。";
+      } finally {
+        btn.innerText = "手動更新";
+        btn.disabled = false;
+        
+        // 重置並設定 30 秒自動更新
+        clearTimeout(autoRefreshTimer);
+        autoRefreshTimer = setTimeout(fetchData, 30000);
+      }
+    }
+
+    function renderUI(allEtas) {
+      const list = document.getElementById("busList");
+      list.innerHTML = ""; // 清空舊資料
+
+      monitorBuses.forEach(bus => {
+        let busEtas = allEtas.filter(b => b.route === bus.route && b.eta != null && b.dest_tc.includes(bus.matchDest));
+        let etaDisplay = "-";
+        let isWheelchairAccessible = false;
+        let isImminent = false;
+        
+        if (busEtas.length > 0) {
+          busEtas.sort((a, b) => new Date(a.eta) - new Date(b.eta));
+          let diff = Math.max(0, Math.floor((new Date(busEtas[0].eta) - new Date()) / 60000));
+          if (diff === 0) {
+            etaDisplay = "即將";
+            isImminent = true;
+          } else {
+            etaDisplay = diff.toString();
+          }
+          isWheelchairAccessible = (busEtas[0].w === "Y");
+        }
+
+        const row = document.createElement("div");
+        row.className = "bus-row";
+        
+        // HTML 結構
+        row.innerHTML = `
+          <div class="route">${bus.route}</div>
+          <div class="dest">往 ${bus.dest}</div>
+          <div class="wheelchair">${isWheelchairAccessible ? "♿" : ""}</div>
+          <div class="eta-container">
+            <span class="eta ${etaDisplay === "-" ? "none" : ""}">${etaDisplay}</span>
+            ${(!isImminent && etaDisplay !== "-") ? '<span class="eta-unit">分</span>' : ''}
+          </div>
+        `;
+        
+        // 點擊整列直接跳轉至 KMB App
+        row.onclick = () => window.location.href = "app1933://";
+        
+        list.appendChild(row);
+      });
+    }
+
+    // 初始載入
+    fetchData();
+  </script>
+</body>
+</html>

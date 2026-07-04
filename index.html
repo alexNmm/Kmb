@@ -10,7 +10,6 @@
   <title>400米內巴士動態</title>
   
   <style>
-    /* 樣式保持不變 */
     :root { --bg-color: #000000; --card-bg: #1c1c1e; --text-main: #ffffff; --text-sec: #ebebf599; --accent: #ffd60a; --kmb-red: #ff3b30; --blue: #0a84ff; }
     body { margin: 0; padding: 0; background-color: var(--bg-color); color: var(--text-main); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; user-select: none; }
     .header { background-color: rgba(28, 28, 30, 0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); padding: 20px 20px 15px; padding-top: env(safe-area-inset-top, 45px); display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; border-bottom: 0.5px solid rgba(255,255,255,0.1); }
@@ -52,7 +51,7 @@
   </div>
 
   <script>
-    const SEARCH_RADIUS = 400; 
+    const SEARCH_RADIUS = 400; // 已修改為 400 米
     let allKmbStopsCache = null;
     let autoRefreshTimer;
 
@@ -97,10 +96,9 @@
       const list = document.getElementById("busList");
       const statusText = document.getElementById("statusText");
       
-      // 顯示定位誤差，幫助抓蟲
       let debugHtml = `<div class="debug-info">💡 GPS 誤差範圍：約 ${Math.round(accuracy)} 米<br>(如果大於 100 米，代表定位不夠準確)</div>`;
       
-      if(statusText) statusText.innerHTML = `正在搜尋 300 米內的巴士站...<br>${debugHtml}`;
+      if(statusText) statusText.innerHTML = `正在搜尋 400 米內的巴士站...<br>${debugHtml}`; // 已更新文字
       
       try {
         if (!allKmbStopsCache) {
@@ -159,7 +157,14 @@
       });
       
       let finalEtas = Array.from(uniqueEtasMap.values());
-      finalEtas.sort((a, b) => new Date(a.eta) - new Date(b.eta));
+      
+      // 已修改：優先以距離（由近到遠）排序，距離相同則以到站時間排序
+      finalEtas.sort((a, b) => {
+        if (a.distance !== b.distance) {
+          return a.distance - b.distance;
+        }
+        return new Date(a.eta) - new Date(b.eta);
+      });
 
       if (finalEtas.length === 0) {
         list.innerHTML = `<div class="status-area">目前附近站點沒有即將到站的班次。</div>`;

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-HK">
-<head> 
+<head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -28,58 +28,27 @@
     .eta-box { text-align: right; min-width: 70px; display: flex; flex-direction: column; align-items: flex-end; }
     .eta-time { font-size: 28px; font-weight: 800; color: var(--accent); line-height: 1.1; }
     .eta-imminent { color: var(--kmb-red); font-size: 24px; }
-    .eta-none { color: #666; font-size: 24px; }
     .eta-unit { font-size: 12px; color: var(--text-sec); font-weight: 500; margin-top: 4px; }
     .status-area { text-align: center; padding: 40px 20px; color: var(--text-sec); font-size: 15px; line-height: 1.5; }
     .loader { display: inline-block; width: 24px; height: 24px; border: 3px solid rgba(255, 255, 255, 0.1); border-radius: 50%; border-top-color: var(--blue); animation: spin 1s ease-in-out infinite; margin-bottom: 12px; }
-    .debug-info { margin-top: 15px; font-size: 12px; color: #ff9f0a; background: rgba(255,159,10,0.1); padding: 8px; border-radius: 8px; }
+    
+    .install-prompt { display: none; position: fixed; left: 50%; transform: translateX(-50%); background-color: rgba(255, 255, 255, 0.98); color: #000; padding: 18px 20px 16px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); z-index: 9999; width: 85%; max-width: 340px; text-align: center; animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+    .close-btn { position: absolute; top: 8px; right: 12px; background: none; border: none; font-size: 20px; color: #aaa; cursor: pointer; }
     @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* --- 加入主畫面引導氣泡的動態樣式 --- */
-    .install-prompt {
-      display: none; 
-      position: fixed;
-      left: 50%;
-      transform: translateX(-50%);
-      background-color: rgba(255, 255, 255, 0.98);
-      color: #000;
-      padding: 18px 20px 16px;
-      border-radius: 20px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-      z-index: 9999;
-      width: 85%;
-      max-width: 340px;
-      text-align: center;
-      animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-    }
-    .install-prompt .close-btn {
-      position: absolute;
-      top: 8px;
-      right: 12px;
-      background: none;
-      border: none;
-      font-size: 20px;
-      color: #aaa;
-      cursor: pointer;
-      padding: 5px;
-    }
-    @keyframes popIn {
-      0% { opacity: 0; transform: translate(-50%, 20px) scale(0.9); }
-      100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
-    }
+    @keyframes popIn { 0% { opacity: 0; transform: translate(-50%, 20px) scale(0.9); } 100% { opacity: 1; transform: translate(-50%, 0) scale(1); } }
   </style>
 </head>
 <body>
 
   <div class="header">
     <div class="header-title">📍 附近巴士</div>
-    <button class="refresh-btn" id="refreshBtn" onclick="initGeolocation()">更新中...</button>
+    <button class="refresh-btn" id="refreshBtn" onclick="initGeolocation()">更新</button>
   </div>
 
   <div class="list-container" id="busList">
     <div class="status-area" id="statusArea">
       <div class="loader"></div>
-      <div id="statusText">正在獲取你的 GPS 位置...</div>
+      <div id="statusText">正在獲取位置...</div>
     </div>
   </div>
 
@@ -90,7 +59,6 @@
     let allKmbStopsCache = null;
     let autoRefreshTimer;
 
-    // 💡 全新圖文並茂的安裝引導
     function checkInstallPrompt() {
       const ua = navigator.userAgent.toLowerCase();
       const isIOS = /ipad|iphone|ipod/.test(ua) && !window.MSStream;
@@ -100,202 +68,81 @@
       if (!isStandalone) {
         setTimeout(() => {
           const promptEl = document.getElementById('installPrompt');
-          
           if (isIOS) {
             promptEl.style.bottom = '25px';
-            promptEl.innerHTML = `
-              <button class="close-btn" onclick="document.getElementById('installPrompt').style.display='none'">✕</button>
-              <div style="font-weight:700; margin-bottom: 12px; color:var(--blue); font-size:17px; letter-spacing:0.5px;">💡 轉成App</div>
-              <div style="text-align: left; font-size: 15px; display: inline-block; line-height: 2;">
-                1. 點擊下方 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: sub; margin: 0 2px; color:var(--blue);"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg> 分享按鈕<br>
-                2. 在選單中<b>一直往下滑動</b><br>
-                3. 點選 <span style="background:#f2f2f7; padding:4px 8px; border-radius:8px; color:#000; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,0.1);">➕ 加入主畫面</span>
-              </div>
-              <div style="position: absolute; bottom: -12px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 14px solid transparent; border-right: 14px solid transparent; border-top: 14px solid rgba(255, 255, 255, 0.98);"></div>
-            `;
+            promptEl.innerHTML = `<button class="close-btn" onclick="this.parentElement.style.display='none'">✕</button>
+              <div style="font-weight:700; margin-bottom: 12px; color:var(--blue); font-size:17px;">💡 升級專屬 App</div>
+              <div style="text-align: left; font-size: 15px; line-height: 2;">1. 點擊下方分享按鈕<br>2. 往下滑動找到<b>「加入主畫面」</b></div>`;
             promptEl.style.display = 'block';
           } else if (isAndroid) {
             promptEl.style.top = '15px';
-            promptEl.innerHTML = `
-              <button class="close-btn" onclick="document.getElementById('installPrompt').style.display='none'">✕</button>
-              <div style="font-weight:700; margin-bottom: 12px; color:var(--blue); font-size:17px; letter-spacing:0.5px;">💡 免費升級專屬 App</div>
-              <div style="text-align: left; font-size: 15px; display: inline-block; line-height: 2;">
-                1. 點擊右上角 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: sub; margin: 0 2px;"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg> 選單<br>
-                2. 點選 <span style="background:#f2f2f7; padding:4px 8px; border-radius:8px; color:#000; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,0.1);">加至主畫面</span>
-              </div>
-              <div style="position: absolute; top: -12px; right: 20px; width: 0; height: 0; border-left: 14px solid transparent; border-right: 14px solid transparent; border-bottom: 14px solid rgba(255, 255, 255, 0.98);"></div>
-            `;
+            promptEl.innerHTML = `<button class="close-btn" onclick="this.parentElement.style.display='none'">✕</button>
+              <div style="font-weight:700; margin-bottom: 12px; color:var(--blue); font-size:17px;">💡 升級專屬 App</div>
+              <div style="text-align: left; font-size: 15px; line-height: 2;">1. 點擊右上角 ⋮ 選單<br>2. 選擇<b>「加至主畫面」</b></div>`;
             promptEl.style.display = 'block';
           }
         }, 2000);
       }
     }
 
-    async function fetchWithRetry(url, maxRetries = 2) {
-      let lastError;
-      for (let i = 0; i <= maxRetries; i++) {
-        try {
-          let res = await fetch(url);
-          if (!res.ok) throw new Error(`HTTP 錯誤 (${res.status})`);
-          return await res.json();
-        } catch (e) {
-          lastError = e;
-          if (i < maxRetries) await new Promise(r => setTimeout(r, 1000));
-        }
-      }
-      throw lastError; 
-    }
-
-    function initGeolocation() {
+    function initGeolocation(retryCount = 0) {
       const btn = document.getElementById("refreshBtn");
       btn.innerText = "定位中...";
       btn.disabled = true;
-      clearTimeout(autoRefreshTimer);
-
-      if (!navigator.geolocation) {
-        showError("你的裝置不支援 GPS 定位。");
-        return;
-      }
 
       navigator.geolocation.getCurrentPosition(
-        (position) => {
-          fetchNearbyBuses(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+        (pos) => fetchNearbyBuses(pos.coords.latitude, pos.coords.longitude),
+        (err) => {
+          if (retryCount < 1) setTimeout(() => initGeolocation(retryCount + 1), 2000);
+          else showError("無法定位，請確認已開啟位置授權。");
         },
-        (error) => {
-          let msg = "無法獲取位置。";
-          if (error.code === 1) msg = "你拒絕了定位權限，請在設定中開啟。";
-          if (error.code === 2) msg = "無法取得 GPS 訊號。";
-          if (error.code === 3) msg = "定位超時。";
-          showError(msg);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 300000 }
       );
     }
 
-    function getDistance(lat1, lon1, lat2, lon2) {
-      const R = 6371e3; 
-      const p1 = lat1 * Math.PI/180;
-      const p2 = lat2 * Math.PI/180;
-      const dp = (lat2-lat1) * Math.PI/180;
-      const dl = (lon2-lon1) * Math.PI/180;
-      const a = Math.sin(dp/2) * Math.sin(dp/2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl/2) * Math.sin(dl/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return Math.round(R * c);
-    }
-
-    async function fetchNearbyBuses(userLat, userLon, accuracy) {
-      const list = document.getElementById("busList");
-      const statusText = document.getElementById("statusText");
-      
-      let debugHtml = `<div class="debug-info">💡 GPS 誤差範圍：約 ${Math.round(accuracy)} 米</div>`;
-      if(statusText) statusText.innerHTML = `正在搜尋 400 米內的巴士站...<br>${debugHtml}`; 
-      
+    async function fetchNearbyBuses(lat, lon) {
       try {
         if (!allKmbStopsCache) {
-          let stopsJson = await fetchWithRetry("https://data.etabus.gov.hk/v1/transport/kmb/stop");
-          allKmbStopsCache = stopsJson.data;
+          let res = await fetch("https://data.etabus.gov.hk/v1/transport/kmb/stop");
+          allKmbStopsCache = (await res.json()).data;
         }
 
-        let nearbyStops = allKmbStopsCache.map(stop => {
-          return { ...stop, distance: getDistance(userLat, userLon, stop.lat, stop.long) };
-        }).filter(stop => stop.distance <= SEARCH_RADIUS);
-
-        nearbyStops.sort((a, b) => a.distance - b.distance);
-
-        if (nearbyStops.length === 0) {
-          showError(`在你附近 ${SEARCH_RADIUS} 米內找不到九巴站點。<br>${debugHtml}`);
-          return;
-        }
-
-        let targetStops = nearbyStops.slice(0, 15);
-        if(statusText) statusText.innerHTML = `找到 ${nearbyStops.length} 個站點，正在獲取到站時間...`;
-
-        let fetchPromises = targetStops.map(async (stop) => {
-          try {
-            let etaJson = await fetchWithRetry(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${stop.stop}`);
-            if (etaJson && etaJson.data) {
-              return etaJson.data.map(eta => ({ ...eta, stopName: stop.name_tc, distance: stop.distance }));
-            }
-            return [];
-          } catch(err) {
-            return [];
-          }
+        let nearby = allKmbStopsCache.filter(stop => {
+          let d = Math.sqrt(Math.pow((stop.lat - lat) * 111000, 2) + Math.pow((stop.long - lon) * 111000, 2));
+          return d <= SEARCH_RADIUS;
         });
-        
-        let results = await Promise.all(fetchPromises);
-        let allEtas = results.flat();
 
-        renderUI(allEtas);
+        let etas = (await Promise.all(nearby.map(async s => {
+          let res = await fetch(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${s.stop}`);
+          return (await res.json()).data.map(e => ({...e, stopName: s.name_tc}));
+        }))).flat().filter(b => b.eta && new Date(b.eta) > new Date()).sort((a,b) => new Date(a.eta) - new Date(b.eta));
 
-      } catch (e) {
-        showError(`⚠️ 數據獲取失敗，請檢查網路連線。<br><div class="debug-info" style="color:#ff453a;">錯誤原因：${e.message}</div>`);
-      }
+        renderUI(etas);
+      } catch (e) { showError("無法連線至九巴伺服器。"); }
     }
 
-    function renderUI(allEtas) {
+    function renderUI(etas) {
       const list = document.getElementById("busList");
-      const btn = document.getElementById("refreshBtn");
-      list.innerHTML = ""; 
-
-      const now = new Date();
-      let validEtas = allEtas.filter(b => b.eta != null && new Date(b.eta) >= now);
-
-      let uniqueEtasMap = new Map();
-      validEtas.forEach(b => {
-        let key = `${b.route}-${b.dir}-${b.stopName}`;
-        if (!uniqueEtasMap.has(key) || new Date(b.eta) < new Date(uniqueEtasMap.get(key).eta)) {
-          uniqueEtasMap.set(key, b);
-        }
+      list.innerHTML = etas.length ? "" : "附近暫無班次。";
+      etas.forEach(bus => {
+        let min = Math.max(0, Math.floor((new Date(bus.eta) - new Date()) / 60000));
+        list.innerHTML += `<div class="bus-card">
+          <div class="bus-info">
+            <div class="route-row"><span class="route-num">${bus.route}</span><span class="route-dest">往 ${bus.dest_tc}</span></div>
+            <div class="stop-row"><span class="stop-name">${bus.stopName}</span></div>
+          </div>
+          <div class="eta-box"><span class="eta-time">${min === 0 ? "即將" : min}</span><div class="eta-unit">${min === 0 ? "到達" : "分鐘"}</div></div>
+        </div>`;
       });
-      
-      let finalEtas = Array.from(uniqueEtasMap.values());
-      
-      finalEtas.sort((a, b) => {
-        if (a.distance !== b.distance) {
-          return a.distance - b.distance;
-        }
-        return new Date(a.eta) - new Date(b.eta);
-      });
-
-      if (finalEtas.length === 0) {
-        list.innerHTML = `<div class="status-area">目前附近站點沒有即將到站的班次 (可能已收車)。</div>`;
-      } else {
-        finalEtas.forEach(bus => {
-          let diff = Math.max(0, Math.floor((new Date(bus.eta) - new Date()) / 60000));
-          let etaDisplay = diff.toString();
-          let etaClass = "eta-time";
-          let unitHtml = '<div class="eta-unit">分鐘</div>';
-
-          if (diff === 0) {
-            etaDisplay = "即將";
-            etaClass = "eta-time eta-imminent";
-            unitHtml = '<div class="eta-unit">到達</div>';
-          }
-
-          const card = document.createElement("div");
-          card.className = "bus-card";
-          card.innerHTML = `
-            <div class="bus-info">
-              <div class="route-row"><span class="route-num">${bus.route}</span><span class="route-dest">往 ${bus.dest_tc}</span></div>
-              <div class="stop-row"><span class="stop-dist">${bus.distance}m</span><span class="stop-name">${bus.stopName} ${bus.w === "Y" ? "♿" : ""}</span></div>
-            </div>
-            <div class="eta-box"><span class="${etaClass}">${etaDisplay}</span>${unitHtml}</div>
-          `;
-          list.appendChild(card);
-        });
-      }
-
-      btn.innerText = "更新";
-      btn.disabled = false;
+      document.getElementById("refreshBtn").innerText = "更新";
+      document.getElementById("refreshBtn").disabled = false;
       autoRefreshTimer = setTimeout(initGeolocation, 30000);
     }
 
     function showError(msg) {
-      const list = document.getElementById("busList");
-      const btn = document.getElementById("refreshBtn");
-      list.innerHTML = `<div class="status-area">${msg}</div>`;
-      btn.innerText = "重新定位";
-      btn.disabled = false;
+      document.getElementById("busList").innerHTML = `<div class="status-area">${msg}</div>`;
+      document.getElementById("refreshBtn").innerText = "重試";
+      document.getElementById("refreshBtn").disabled = false;
     }
 
     initGeolocation();

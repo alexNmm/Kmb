@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="附近巴士">
   <link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/KMB_Logo.svg/1024px-KMB_Logo.svg.png">
-  <title>400米內巴士動態</title>
+  <title>附近巴士 (九巴+城巴)</title>
   
   <style>
     :root { --bg-color: #000000; --card-bg: #1c1c1e; --text-main: #ffffff; --text-sec: #ebebf599; --accent: #ffd60a; --kmb-red: #ff3b30; --blue: #0a84ff; }
@@ -23,13 +23,14 @@
     .route-num { font-size: 26px; font-weight: 800; color: var(--text-main); }
     .route-dest { font-size: 16px; color: var(--text-sec); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .stop-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--blue); font-weight: 500; }
+    .stop-dist { background: rgba(10, 132, 255, 0.2); padding: 2px 6px; border-radius: 6px; font-size: 11px; }
     .stop-name { color: #98989d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
     .eta-box { text-align: right; min-width: 70px; display: flex; flex-direction: column; align-items: flex-end; }
     .eta-time { font-size: 28px; font-weight: 800; color: var(--accent); line-height: 1.1; }
+    .eta-imminent { color: var(--kmb-red); font-size: 24px; }
     .eta-unit { font-size: 12px; color: var(--text-sec); font-weight: 500; margin-top: 4px; }
     .status-area { text-align: center; padding: 40px 20px; color: var(--text-sec); font-size: 15px; line-height: 1.5; }
     .loader { display: inline-block; width: 24px; height: 24px; border: 3px solid rgba(255, 255, 255, 0.1); border-radius: 50%; border-top-color: var(--blue); animation: spin 1s ease-in-out infinite; margin-bottom: 12px; }
-    
     .install-prompt { display: none; position: fixed; left: 50%; transform: translateX(-50%); background-color: rgba(255, 255, 255, 0.98); color: #000; padding: 18px 20px 16px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); z-index: 9999; width: 85%; max-width: 340px; text-align: center; animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
     .close-btn { position: absolute; top: 8px; right: 12px; background: none; border: none; font-size: 20px; color: #aaa; cursor: pointer; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -46,7 +47,7 @@
   <div class="list-container" id="busList">
     <div class="status-area" id="statusArea">
       <div class="loader"></div>
-      <div id="statusText">正在獲取位置...</div>
+      <div id="statusText">正在搜尋九巴與城巴...</div>
     </div>
   </div>
 
@@ -54,16 +55,27 @@
 
   <script>
     const SEARCH_RADIUS = 400; 
-    let allKmbStopsCache = null;
+    let stopsCache = { kmb: null, ct: null };
     let autoRefreshTimer;
 
-    // 💡 安裝引導檢查
+    async function fetchWithRetry(url, retries = 3) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error();
+          return await res.json();
+        } catch (e) {
+          if (i === retries - 1) throw e;
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+    }
+
     function checkInstallPrompt() {
       const ua = navigator.userAgent.toLowerCase();
       const isIOS = /ipad|iphone|ipod/.test(ua) && !window.MSStream;
       const isAndroid = /android/.test(ua);
       const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-
       if (!isStandalone) {
         setTimeout(() => {
           const promptEl = document.getElementById('installPrompt');
@@ -84,25 +96,10 @@
       }
     }
 
-    // 💡 內建 3 次重試機制的 Fetch
-    async function fetchWithRetry(url, retries = 3) {
-      for (let i = 0; i < retries; i++) {
-        try {
-          const res = await fetch(url);
-          if (!res.ok) throw new Error();
-          return await res.json();
-        } catch (e) {
-          if (i === retries - 1) throw e;
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      }
-    }
-
     function initGeolocation(retryCount = 0) {
       const btn = document.getElementById("refreshBtn");
       btn.innerText = "定位中...";
       btn.disabled = true;
-
       navigator.geolocation.getCurrentPosition(
         (pos) => fetchNearbyBuses(pos.coords.latitude, pos.coords.longitude),
         (err) => {
@@ -115,23 +112,36 @@
 
     async function fetchNearbyBuses(lat, lon) {
       try {
-        if (!allKmbStopsCache) {
-          allKmbStopsCache = (await fetchWithRetry("https://data.etabus.gov.hk/v1/transport/kmb/stop")).data;
+        if (!stopsCache.kmb) {
+          const [kmb, ct] = await Promise.all([
+            fetchWithRetry("https://data.etabus.gov.hk/v1/transport/kmb/stop"),
+            fetchWithRetry("https://rt.data.gov.hk/v1.1/transport/citybus-nwfb/stop/all")
+          ]);
+          stopsCache.kmb = kmb.data.map(s => ({...s, lat: parseFloat(s.lat), long: parseFloat(s.long), type: 'kmb'}));
+          stopsCache.ct = ct.data.map(s => ({...s, lat: parseFloat(s.lat), long: parseFloat(s.long), type: 'ct'}));
         }
 
-        let nearby = allKmbStopsCache.filter(stop => {
-          let d = Math.sqrt(Math.pow((stop.lat - lat) * 111000, 2) + Math.pow((stop.long - lon) * 111000, 2));
+        let nearby = [...stopsCache.kmb, ...stopsCache.ct].filter(s => {
+          let d = Math.sqrt(Math.pow((s.lat - lat) * 111000, 2) + Math.pow((s.long - lon) * 111000, 2));
           return d <= SEARCH_RADIUS;
         });
 
         let etas = (await Promise.all(nearby.map(async s => {
           try {
-            return (await fetchWithRetry(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${s.stop}`)).data.map(e => ({...e, stopName: s.name_tc}));
+            const url = s.type === 'kmb' ? `https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${s.stop}` : `https://rt.data.gov.hk/v1.1/transport/citybus-nwfb/eta/ctb/${s.stop}`;
+            const res = await fetchWithRetry(url);
+            return (res.data || []).map(e => ({
+              route: e.route || e.Route, 
+              eta: e.eta || e.Et, 
+              dest: e.dest_tc || e.DestCn, 
+              stopName: s.name_tc,
+              dist: s.distance
+            }));
           } catch { return []; }
         }))).flat().filter(b => b.eta && new Date(b.eta) > new Date()).sort((a,b) => new Date(a.eta) - new Date(b.eta));
 
         renderUI(etas);
-      } catch (e) { showError("無法連線至九巴伺服器，請稍後再試。"); }
+      } catch (e) { showError("無法連線至伺服器。"); }
     }
 
     function renderUI(etas) {
@@ -141,7 +151,7 @@
         let min = Math.max(0, Math.floor((new Date(bus.eta) - new Date()) / 60000));
         list.innerHTML += `<div class="bus-card">
           <div class="bus-info">
-            <div class="route-row"><span class="route-num">${bus.route}</span><span class="route-dest">往 ${bus.dest_tc}</span></div>
+            <div class="route-row"><span class="route-num">${bus.route}</span><span class="route-dest">往 ${bus.dest}</span></div>
             <div class="stop-row"><span class="stop-name">${bus.stopName}</span></div>
           </div>
           <div class="eta-box"><span class="eta-time">${min === 0 ? "即將" : min}</span><div class="eta-unit">${min === 0 ? "到達" : "分鐘"}</div></div>
@@ -159,7 +169,7 @@
     }
 
     initGeolocation();
-    checkInstallPrompt(); // 💡 確保有這行！
+    checkInstallPrompt();
   </script>
 </body>
 </html>

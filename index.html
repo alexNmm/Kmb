@@ -17,7 +17,7 @@
     .refresh-btn { background: rgba(10, 132, 255, 0.15); border: none; color: var(--blue); font-size: 14px; font-weight: 600; cursor: pointer; padding: 6px 14px; border-radius: 16px; transition: all 0.2s; }
     .refresh-btn:active { opacity: 0.6; transform: scale(0.95); }
     
-    /* 💡 新增：車站過濾區塊的 CSS */
+    /* 車站過濾區區塊 */
     .filter-container { display: flex; overflow-x: auto; gap: 10px; padding: 12px 16px 4px; scrollbar-width: none; background-color: var(--bg-color); position: sticky; top: calc(env(safe-area-inset-top, 45px) + 56px); z-index: 99; }
     .filter-container::-webkit-scrollbar { display: none; }
     .filter-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); color: var(--text-sec); border-radius: 20px; padding: 8px 16px; font-size: 14px; white-space: nowrap; cursor: pointer; transition: 0.2s; }
@@ -66,9 +66,8 @@
     let allKmbStopsCache = null;
     let autoRefreshTimer;
     
-    // 💡 新增：全域變數，用來記錄當前獲取到的班次和過濾狀態
     let currentEtas = []; 
-    let currentFilterStopName = "All"; 
+    let currentFilterStopName = "All"; // 儲存當前過濾的「純中文站名」
 
     function checkInstallPrompt() {
       const ua = navigator.userAgent.toLowerCase();
@@ -113,7 +112,7 @@
       const btn = document.getElementById("refreshBtn");
       btn.innerText = "定位中...";
       btn.disabled = true;
-      document.getElementById("stopFilters").style.display = "none"; // 載入時先隱藏過濾條
+      document.getElementById("stopFilters").style.display = "none"; 
 
       navigator.geolocation.getCurrentPosition(
         (pos) => fetchNearbyBuses(pos.coords.latitude, pos.coords.longitude),
@@ -131,21 +130,40 @@
           allKmbStopsCache = (await fetchWithRetry("https://data.etabus.gov.hk/v1/transport/kmb/stop")).data;
         }
 
+        // 1. 計算距離並加入物件中，過濾 400 米內的車站
         let nearby = allKmbStopsCache.map(stop => {
           let d = Math.sqrt(Math.pow((stop.lat - lat) * 111000, 2) + Math.pow((stop.long - lon) * 111000, 2));
           return { ...stop, distance: d };
         }).filter(stop => stop.distance <= SEARCH_RADIUS);
 
-        let etas = (await Promise.all(nearby.map(async s => {
+        // 2. 獲取並合併所有分站的 ETA
+        let rawEtas = (await Promise.all(nearby.map(async s => {
           try {
             return (await fetchWithRetry(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${s.stop}`)).data.map(e => ({
               ...e, 
-              stopName: s.name_tc,
-              distance: s.distance 
+              stopNameClean: s.name_tc, // 純中文站名，用作合併與過濾
+              distance: s.distance
             }));
           } catch { return []; }
         }))).flat().filter(b => b.eta && new Date(b.eta) > new Date());
 
+        // 💡 核心優化：過濾掉因為變體（例如：經山麗/不經山麗）導致在同站、同線路、同時間產生的重複推播
+        let uniqueMap = new Map();
+        rawEtas.forEach(item => {
+          // 產生唯一的辨識 Key：站名 + 路線 + 目的地 + 到站時間
+          let key = `${item.stopNameClean}_${item.route}_${item.dest_tc}_${item.eta}`;
+          if (!uniqueMap.has(key)) {
+            uniqueMap.set(key, item);
+          } else {
+             // 如果重複了，優先保留文字敘述較長的變體（通常資訊更完整，例如含有 [不經山麗]）
+             if ((item.dest_tc || '').length > (uniqueMap.get(key).dest_tc || '').length) {
+                 uniqueMap.set(key, item);
+             }
+          }
+        });
+        let etas = Array.from(uniqueMap.values());
+
+        // 3. 雙重排序：永遠維持「由近到遠」，同車站則按照「時間由早到晚」
         etas.sort((a, b) => {
           if (a.distance !== b.distance) {
             return a.distance - b.distance; 
@@ -153,22 +171,20 @@
           return new Date(a.eta) - new Date(b.eta);
         });
 
-        // 💡 儲存到全域變數，供過濾功能使用
         currentEtas = etas;
         
-        // 如果是重新整理，若之前選的車站不再附近，則重置為 "All"
-        const availableStops = [...new Set(currentEtas.map(b => b.stopName))];
+        // 驗證原本點選的車站過濾器是否還在有效範圍內
+        const availableStops = [...new Set(currentEtas.map(b => b.stopNameClean))];
         if (currentFilterStopName !== "All" && !availableStops.includes(currentFilterStopName)) {
             currentFilterStopName = "All";
         }
 
-        renderFilters(); // 繪製按鈕
-        renderUI();      // 繪製列表
+        renderFilters(); 
+        renderUI();      
 
         document.getElementById("refreshBtn").innerText = "更新";
         document.getElementById("refreshBtn").disabled = false;
         
-        // 重置自動更新計時器
         clearTimeout(autoRefreshTimer);
         autoRefreshTimer = setTimeout(() => initGeolocation(), 30000);
 
@@ -177,7 +193,7 @@
       }
     }
 
-    // 💡 新增：生成車站過濾按鈕的函數
+    // 生成「已合併重複名稱」的車站過濾按鈕
     function renderFilters() {
       const filterContainer = document.getElementById("stopFilters");
       if (!currentEtas || currentEtas.length === 0) {
@@ -185,15 +201,13 @@
         return;
       }
       
-      // 擷取所有不重複的站名
-      let uniqueStops = [...new Set(currentEtas.map(b => b.stopName))];
+      // 💡 這裡純粹用乾淨的中文站名去重，所以「聯和墟總站」不論有多少個柱 ID 都只會出現一次
+      let uniqueStops = [...new Set(currentEtas.map(b => b.stopNameClean))];
       
       filterContainer.style.display = "flex";
       
-      // 生成「全部」按鈕
       let html = `<button class="filter-btn ${currentFilterStopName === 'All' ? 'active' : ''}" onclick="setFilter('All')">全部</button>`;
       
-      // 生成各車站按鈕
       uniqueStops.forEach(stop => {
         html += `<button class="filter-btn ${currentFilterStopName === stop ? 'active' : ''}" onclick="setFilter('${stop}')">${stop}</button>`;
       });
@@ -201,21 +215,18 @@
       filterContainer.innerHTML = html;
     }
 
-    // 💡 新增：處理點擊過濾按鈕的事件
     function setFilter(stopName) {
       currentFilterStopName = stopName;
-      renderFilters(); // 更新按鈕的顏色狀態 (active)
-      renderUI();      // 只更新下面的清單，不需要重新向九巴伺服器發送請求
+      renderFilters(); 
+      renderUI();      
     }
 
-    // 💡 更新：加入過濾邏輯的 renderUI
     function renderUI() {
       const list = document.getElementById("busList");
       
-      // 根據 currentFilterStopName 過濾要顯示的班次
       let displayEtas = currentEtas;
       if (currentFilterStopName !== "All") {
-        displayEtas = currentEtas.filter(b => b.stopName === currentFilterStopName);
+        displayEtas = currentEtas.filter(b => b.stopNameClean === currentFilterStopName);
       }
 
       list.innerHTML = displayEtas.length ? "" : "<div class='status-area'>所選車站暫無班次。</div>";
@@ -231,7 +242,7 @@
               <span class="route-dest">往 ${bus.dest_tc}</span>
             </div>
             <div class="stop-row">
-              <span class="stop-name">${bus.stopName}</span>
+              <span class="stop-name">${bus.stopNameClean}</span>
               <span style="color: #98989d; font-size: 11px; margin-left: 6px;">(${dist}m)</span>
             </div>
           </div>

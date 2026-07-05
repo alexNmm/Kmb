@@ -17,19 +17,13 @@
     .refresh-btn { background: rgba(10, 132, 255, 0.15); border: none; color: var(--blue); font-size: 14px; font-weight: 600; cursor: pointer; padding: 6px 14px; border-radius: 16px; transition: all 0.2s; }
     .refresh-btn:active { opacity: 0.6; transform: scale(0.95); }
     
-    /* 車站與路線過濾按鈕區塊 */
     .filter-container { display: flex; overflow-x: auto; gap: 10px; padding: 12px 16px 4px; scrollbar-width: none; background-color: var(--bg-color); position: sticky; z-index: 99; }
     .filter-container::-webkit-scrollbar { display: none; }
-    
-    /* 車站欄固定在 Header 下方 */
     #stopFilters { top: calc(env(safe-area-inset-top, 45px) + 56px); border-bottom: 0.5px solid rgba(255,255,255,0.05); }
-    /* 路線欄緊跟在車站欄下方 */
     #routeFilters { top: calc(env(safe-area-inset-top, 45px) + 110px); padding-top: 4px; padding-bottom: 8px; }
 
     .filter-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); color: var(--text-sec); border-radius: 20px; padding: 6px 14px; font-size: 13px; white-space: nowrap; cursor: pointer; transition: 0.2s; }
     .filter-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); font-weight: 600; }
-    
-    /* 路線按鈕樣式 */
     .route-filter-btn { background: rgba(255, 214, 10, 0.05); border-color: rgba(255, 214, 10, 0.2); color: #ffe66d; }
     .route-filter-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
 
@@ -61,7 +55,6 @@
   </div>
 
   <div id="stopFilters" class="filter-container" style="display: none;"></div>
-  
   <div id="routeFilters" class="filter-container" style="display: none;"></div>
 
   <div class="list-container" id="busList">
@@ -111,7 +104,6 @@
     async function fetchWithRetry(url, retries = 3) {
       for (let i = 0; i < retries; i++) {
         try {
-          // 💡 優化：在 URL 後面強制加上時間戳記（_t），破除主畫面 App 的 API 緩存機制
           const separator = url.includes('?') ? '&' : '?';
           const res = await fetch(`${url}${separator}_t=${Date.now()}`);
           if (!res.ok) throw new Error();
@@ -123,9 +115,7 @@
       }
     }
 
-    // 💡 關鍵修正：確實清除計時器，並強制要求最新 GPS 座標
     function initGeolocation(retryCount = 0, isManualClick = false) {
-      // 如果是用戶手動按 Refresh，立刻清除背後的自動更新計時器，防止兩個定位程序衝突
       if (isManualClick) {
         clearTimeout(autoRefreshTimer);
       }
@@ -142,11 +132,7 @@
           if (retryCount < 1) setTimeout(() => initGeolocation(retryCount + 1, isManualClick), 2000);
           else showError("無法定位，請確認已開啟位置授權。");
         },
-        { 
-          enableHighAccuracy: true, 
-          timeout: 15000,           
-          maximumAge: 0 // 💡 設為 0：只要執行此段，強制手機硬體重新尋找當前 GPS，絕不允許讀取快取舊位置
-        }
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
       );
     }
 
@@ -175,17 +161,22 @@
 
         let uniqueMap = new Map();
         rawEtas.forEach(item => {
+          // 💡 修正：Key 完全包含目的地，確保「粉嶺站」與「彩石邨」獨立並存、絕不誤刪！
           let key = `${item.stopNameClean}_${item.route}_${item.dest_tc}_${item.eta}`;
+          
           if (!uniqueMap.has(key)) {
             uniqueMap.set(key, item);
           } else {
-             if ((item.dest_tc || '').length > (uniqueMap.get(key).dest_tc || '').length) {
+             // 只有在同站、同線、同目的地、且精確到秒的時間完全一樣時，才做純變體覆蓋（不影響獨立目的地）
+             let existing = uniqueMap.get(key);
+             if ((item.variant_tc || '').length > (existing.variant_tc || '').length) {
                  uniqueMap.set(key, item);
              }
           }
         });
         let etas = Array.from(uniqueMap.values());
 
+        // 由近到遠排序
         etas.sort((a, b) => {
           if (a.distance !== b.distance) {
             return a.distance - b.distance; 
@@ -207,7 +198,6 @@
         document.getElementById("refreshBtn").innerText = "更新";
         document.getElementById("refreshBtn").disabled = false;
         
-        // 安全重置下一次的自動更新計時
         clearTimeout(autoRefreshTimer);
         autoRefreshTimer = setTimeout(() => initGeolocation(0, false), 30000);
 
@@ -311,7 +301,6 @@
       document.getElementById("refreshBtn").disabled = false;
     }
 
-    // 初始載入
     initGeolocation(0, false);
     checkInstallPrompt(); 
   </script>

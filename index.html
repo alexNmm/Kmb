@@ -16,6 +16,13 @@
     .header-title { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
     .refresh-btn { background: rgba(10, 132, 255, 0.15); border: none; color: var(--blue); font-size: 14px; font-weight: 600; cursor: pointer; padding: 6px 14px; border-radius: 16px; transition: all 0.2s; }
     .refresh-btn:active { opacity: 0.6; transform: scale(0.95); }
+    
+    /* 💡 新增：車站過濾區塊的 CSS */
+    .filter-container { display: flex; overflow-x: auto; gap: 10px; padding: 12px 16px 4px; scrollbar-width: none; background-color: var(--bg-color); position: sticky; top: calc(env(safe-area-inset-top, 45px) + 56px); z-index: 99; }
+    .filter-container::-webkit-scrollbar { display: none; }
+    .filter-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); color: var(--text-sec); border-radius: 20px; padding: 8px 16px; font-size: 14px; white-space: nowrap; cursor: pointer; transition: 0.2s; }
+    .filter-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); font-weight: 600; }
+
     .list-container { padding: 16px; padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 20px); display: flex; flex-direction: column; gap: 12px; }
     .bus-card { background-color: var(--card-bg); border-radius: 20px; padding: 16px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
     .bus-info { flex-grow: 1; overflow: hidden; }
@@ -43,6 +50,8 @@
     <button class="refresh-btn" id="refreshBtn" onclick="initGeolocation()">更新</button>
   </div>
 
+  <div id="stopFilters" class="filter-container" style="display: none;"></div>
+
   <div class="list-container" id="busList">
     <div class="status-area" id="statusArea">
       <div class="loader"></div>
@@ -56,8 +65,11 @@
     const SEARCH_RADIUS = 400; 
     let allKmbStopsCache = null;
     let autoRefreshTimer;
+    
+    // 💡 新增：全域變數，用來記錄當前獲取到的班次和過濾狀態
+    let currentEtas = []; 
+    let currentFilterStopName = "All"; 
 
-    // 💡 安裝引導檢查
     function checkInstallPrompt() {
       const ua = navigator.userAgent.toLowerCase();
       const isIOS = /ipad|iphone|ipod/.test(ua) && !window.MSStream;
@@ -84,7 +96,6 @@
       }
     }
 
-    // 💡 內建 3 次重試機制的 Fetch
     async function fetchWithRetry(url, retries = 3) {
       for (let i = 0; i < retries; i++) {
         try {
@@ -102,6 +113,7 @@
       const btn = document.getElementById("refreshBtn");
       btn.innerText = "定位中...";
       btn.disabled = true;
+      document.getElementById("stopFilters").style.display = "none"; // 載入時先隱藏過濾條
 
       navigator.geolocation.getCurrentPosition(
         (pos) => fetchNearbyBuses(pos.coords.latitude, pos.coords.longitude),
@@ -119,37 +131,116 @@
           allKmbStopsCache = (await fetchWithRetry("https://data.etabus.gov.hk/v1/transport/kmb/stop")).data;
         }
 
-        let nearby = allKmbStopsCache.filter(stop => {
+        let nearby = allKmbStopsCache.map(stop => {
           let d = Math.sqrt(Math.pow((stop.lat - lat) * 111000, 2) + Math.pow((stop.long - lon) * 111000, 2));
-          return d <= SEARCH_RADIUS;
-        });
+          return { ...stop, distance: d };
+        }).filter(stop => stop.distance <= SEARCH_RADIUS);
 
         let etas = (await Promise.all(nearby.map(async s => {
           try {
-            return (await fetchWithRetry(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${s.stop}`)).data.map(e => ({...e, stopName: s.name_tc}));
+            return (await fetchWithRetry(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${s.stop}`)).data.map(e => ({
+              ...e, 
+              stopName: s.name_tc,
+              distance: s.distance 
+            }));
           } catch { return []; }
-        }))).flat().filter(b => b.eta && new Date(b.eta) > new Date()).sort((a,b) => new Date(a.eta) - new Date(b.eta));
+        }))).flat().filter(b => b.eta && new Date(b.eta) > new Date());
 
-        renderUI(etas);
-      } catch (e) { showError("無法連線至九巴伺服器，請稍後再試。"); }
+        etas.sort((a, b) => {
+          if (a.distance !== b.distance) {
+            return a.distance - b.distance; 
+          }
+          return new Date(a.eta) - new Date(b.eta);
+        });
+
+        // 💡 儲存到全域變數，供過濾功能使用
+        currentEtas = etas;
+        
+        // 如果是重新整理，若之前選的車站不再附近，則重置為 "All"
+        const availableStops = [...new Set(currentEtas.map(b => b.stopName))];
+        if (currentFilterStopName !== "All" && !availableStops.includes(currentFilterStopName)) {
+            currentFilterStopName = "All";
+        }
+
+        renderFilters(); // 繪製按鈕
+        renderUI();      // 繪製列表
+
+        document.getElementById("refreshBtn").innerText = "更新";
+        document.getElementById("refreshBtn").disabled = false;
+        
+        // 重置自動更新計時器
+        clearTimeout(autoRefreshTimer);
+        autoRefreshTimer = setTimeout(() => initGeolocation(), 30000);
+
+      } catch (e) { 
+        showError("無法連線至九巴伺服器，請稍後再試。"); 
+      }
     }
 
-    function renderUI(etas) {
+    // 💡 新增：生成車站過濾按鈕的函數
+    function renderFilters() {
+      const filterContainer = document.getElementById("stopFilters");
+      if (!currentEtas || currentEtas.length === 0) {
+        filterContainer.style.display = "none";
+        return;
+      }
+      
+      // 擷取所有不重複的站名
+      let uniqueStops = [...new Set(currentEtas.map(b => b.stopName))];
+      
+      filterContainer.style.display = "flex";
+      
+      // 生成「全部」按鈕
+      let html = `<button class="filter-btn ${currentFilterStopName === 'All' ? 'active' : ''}" onclick="setFilter('All')">全部</button>`;
+      
+      // 生成各車站按鈕
+      uniqueStops.forEach(stop => {
+        html += `<button class="filter-btn ${currentFilterStopName === stop ? 'active' : ''}" onclick="setFilter('${stop}')">${stop}</button>`;
+      });
+      
+      filterContainer.innerHTML = html;
+    }
+
+    // 💡 新增：處理點擊過濾按鈕的事件
+    function setFilter(stopName) {
+      currentFilterStopName = stopName;
+      renderFilters(); // 更新按鈕的顏色狀態 (active)
+      renderUI();      // 只更新下面的清單，不需要重新向九巴伺服器發送請求
+    }
+
+    // 💡 更新：加入過濾邏輯的 renderUI
+    function renderUI() {
       const list = document.getElementById("busList");
-      list.innerHTML = etas.length ? "" : "附近暫無班次。";
-      etas.forEach(bus => {
+      
+      // 根據 currentFilterStopName 過濾要顯示的班次
+      let displayEtas = currentEtas;
+      if (currentFilterStopName !== "All") {
+        displayEtas = currentEtas.filter(b => b.stopName === currentFilterStopName);
+      }
+
+      list.innerHTML = displayEtas.length ? "" : "<div class='status-area'>所選車站暫無班次。</div>";
+      
+      displayEtas.forEach(bus => {
         let min = Math.max(0, Math.floor((new Date(bus.eta) - new Date()) / 60000));
+        let dist = Math.round(bus.distance); 
+        
         list.innerHTML += `<div class="bus-card">
           <div class="bus-info">
-            <div class="route-row"><span class="route-num">${bus.route}</span><span class="route-dest">往 ${bus.dest_tc}</span></div>
-            <div class="stop-row"><span class="stop-name">${bus.stopName}</span></div>
+            <div class="route-row">
+              <span class="route-num">${bus.route}</span>
+              <span class="route-dest">往 ${bus.dest_tc}</span>
+            </div>
+            <div class="stop-row">
+              <span class="stop-name">${bus.stopName}</span>
+              <span style="color: #98989d; font-size: 11px; margin-left: 6px;">(${dist}m)</span>
+            </div>
           </div>
-          <div class="eta-box"><span class="eta-time">${min === 0 ? "即將" : min}</span><div class="eta-unit">${min === 0 ? "到達" : "分鐘"}</div></div>
+          <div class="eta-box">
+            <span class="eta-time">${min === 0 ? "即將" : min}</span>
+            <div class="eta-unit">${min === 0 ? "到達" : "分鐘"}</div>
+          </div>
         </div>`;
       });
-      document.getElementById("refreshBtn").innerText = "更新";
-      document.getElementById("refreshBtn").disabled = false;
-      autoRefreshTimer = setTimeout(initGeolocation, 30000);
     }
 
     function showError(msg) {
@@ -159,7 +250,7 @@
     }
 
     initGeolocation();
-    checkInstallPrompt(); // 💡 確保有這行！
+    checkInstallPrompt(); 
   </script>
 </body>
 </html>

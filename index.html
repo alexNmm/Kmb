@@ -161,17 +161,23 @@
 
         let uniqueMap = new Map();
         rawEtas.forEach(item => {
-          // 💡 修正：Key 完全包含目的地，確保「粉嶺站」與「彩石邨」獨立並存、絕不誤刪！
-          let key = `${item.stopNameClean}_${item.route}_${item.dest_tc}_${item.eta}`;
+          // 💡 全港通用去重核心：利用九巴 API 內建的數據產生時間戳記 (data_timestamp) 
+          // 只要分站、線路、方向、系統時間戳記完全一致，它在物理上絕對是同一班車！
+          let key = `${item.stopNameClean}_${item.route}_${item.dir}_${item.data_timestamp}`;
           
           if (!uniqueMap.has(key)) {
             uniqueMap.set(key, item);
           } else {
-             // 只有在同站、同線、同目的地、且精確到秒的時間完全一樣時，才做純變體覆蓋（不影響獨立目的地）
              let existing = uniqueMap.get(key);
-             if ((item.variant_tc || '').length > (existing.variant_tc || '').length) {
-                 uniqueMap.set(key, item);
+             let dest = (item.dest_tc || '').trim();
+             let extDest = (existing.dest_tc || '').trim();
+             
+             // 如果系統時間一模一樣，但目的地文字不同（例如一個寫中途站，一個寫終點站）
+             if (dest !== extDest && !extDest.includes(dest) && !dest.includes(extDest)) {
+                 // 聰明合併：將兩個目的地串接起來，用斜槓分隔，適用於全香港所有類似機制的路線
+                 existing.dest_tc = `${dest} / ${extDest}`;
              }
+             uniqueMap.set(key, existing);
           }
         });
         let etas = Array.from(uniqueMap.values());

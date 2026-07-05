@@ -29,7 +29,7 @@
     .filter-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); color: var(--text-sec); border-radius: 20px; padding: 6px 14px; font-size: 13px; white-space: nowrap; cursor: pointer; transition: 0.2s; }
     .filter-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); font-weight: 600; }
     
-    /* 路線按鈕樣式稍微加強辨識度 */
+    /* 路線按鈕樣式 */
     .route-filter-btn { background: rgba(255, 214, 10, 0.05); border-color: rgba(255, 214, 10, 0.2); color: #ffe66d; }
     .route-filter-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
 
@@ -80,7 +80,7 @@
     
     let currentEtas = []; 
     let currentFilterStopName = "All"; 
-    let currentFilterRoute = "All"; // 💡 新增：儲存當前點選的巴士路線過濾器
+    let currentFilterRoute = "All"; 
 
     function checkInstallPrompt() {
       const ua = navigator.userAgent.toLowerCase();
@@ -183,15 +183,13 @@
 
         currentEtas = etas;
         
-        // 驗證過濾狀態是否依然有效
         const availableStops = [...new Set(currentEtas.map(b => b.stopNameClean))];
         if (currentFilterStopName !== "All" && !availableStops.includes(currentFilterStopName)) {
             currentFilterStopName = "All";
         }
         
-        // 重新繪製 UI
         renderFilters(); 
-        renderRouteFilters(); // 💡 新增：生成路線過濾器
+        renderRouteFilters(); 
         renderUI();      
 
         document.getElementById("refreshBtn").innerText = "更新";
@@ -223,27 +221,21 @@
       filterContainer.innerHTML = html;
     }
 
-    // 💡 新增：動態生成「巴士路線」過濾按鈕
+    // 💡 優化：只有在「選了特定車站」時，才顯示這一站有什麼路線
     function renderRouteFilters() {
       const routeContainer = document.getElementById("routeFilters");
-      if (!currentEtas || currentEtas.length === 0) {
+      
+      // 如果目前是「全部車站」，就不顯示第二層路線按鈕，避免按鈕太多找不到
+      if (currentFilterStopName === "All" || !currentEtas || currentEtas.length === 0) {
         routeContainer.style.display = "none";
         return;
       }
 
-      // 根據當前「已選車站」來決定要顯示哪些路線（如果選了全部車站，就顯示附近全部路線）
-      let sourceEtas = currentEtas;
-      if (currentFilterStopName !== "All") {
-        sourceEtas = currentEtas.filter(b => b.stopNameClean === currentFilterStopName);
-      }
+      // 篩選出目前選定車站的所有班次
+      let sourceEtas = currentEtas.filter(b => b.stopNameClean === currentFilterStopName);
 
-      // 提取排序過的不重複路線名稱 (例如: 1A, 78A, A43)
+      // 提取該車站有的巴士路線，並排序
       let uniqueRoutes = [...new Set(sourceEtas.map(b => b.route))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true, sensitivity: 'base'}));
-
-      // 如果當前點選的路線，在切換車站後不存在，則重置為 "All"
-      if (currentFilterRoute !== "All" && !uniqueRoutes.includes(currentFilterRoute)) {
-        currentFilterRoute = "All";
-      }
 
       routeContainer.style.display = "flex";
 
@@ -256,25 +248,22 @@
 
     function setFilter(stopName) {
       currentFilterStopName = stopName;
-      // 💡 重大變動：換車站時，將路線選擇重置為全部，避免交叉過濾出空資料
-      currentFilterRoute = "All"; 
+      currentFilterRoute = "All"; // 切換車站時，路線重置為全部
       
       renderFilters(); 
-      renderRouteFilters(); // 重新整理路線按鈕清單
+      renderRouteFilters(); 
       renderUI();      
     }
 
-    // 💡 新增：處理路線按鈕點擊事件
     function setRouteFilter(routeNum) {
       currentFilterRoute = routeNum;
-      renderRouteFilters(); // 更新路線按鈕選取狀態
+      renderRouteFilters(); 
       renderUI();      
     }
 
     function renderUI() {
       const list = document.getElementById("busList");
       
-      // 💡 雙重過濾邏輯：先過濾車站，再過濾路線
       let displayEtas = currentEtas;
       
       if (currentFilterStopName !== "All") {
